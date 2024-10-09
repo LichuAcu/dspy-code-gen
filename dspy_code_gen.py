@@ -94,27 +94,29 @@ class CodeGenerationPipeline:
 
     def _run_code_and_tests(self, task: str, code: str, test_result):
         print("\nRunning the code...")
-        error_messages = {}
         try:
             exec(code)
         except Exception as e:
-            error_messages["code_execution"] = f"Code execution error: {
-                str(e)}"
+            print(f"Code failed with error: {str(e)}")
+            print("Re-generating the code with the execution feedback...")
+            fixed_code = self._fix_code(task, code, "main code", str(e))
+            print(f"\nFixed code:\n{fixed_code}")
+            self._run_code_and_tests(task, fixed_code, test_result)
+            return
 
-        if not error_messages:
-            print("Running the tests...")
-            for test_name, test_code in [("test_1", test_result.test_1),
-                                         ("test_2", test_result.test_2),
-                                         ("edge_case_test_1", test_result.edge_case_test_1)]:
-                try:
-                    exec(test_code)
-                except Exception as e:
-                    print(f"Test {test_name} failed with error: {str(e)}")
-                    print("Re-generating the code with the execution feedback...")
-                    fixed_code = self._fix_code(task, code, test_code, str(e))
-                    print(f"\nFixed code:\n{fixed_code}")
-                    self._run_code_and_tests(task, fixed_code, test_result)
-                    return
+        print("Running the tests...")
+        for test_name, test_code in [("test_1", test_result.test_1),
+                                     ("test_2", test_result.test_2),
+                                     ("edge_case_test_1", test_result.edge_case_test_1)]:
+            try:
+                exec(test_code)
+            except Exception as e:
+                print(f"Test {test_name} failed with error: {str(e)}")
+                print("Re-generating the code with the execution feedback...")
+                fixed_code = self._fix_code(task, code, test_code, str(e))
+                print(f"\nFixed code:\n{fixed_code}")
+                self._run_code_and_tests(task, fixed_code, test_result)
+                return
 
         print("All generated tests passed")
 
