@@ -24,7 +24,8 @@ class CodeSignatureGenerator(dspy.Module):
 class CodeGenerator(dspy.Module):
     def __init__(self):
         super().__init__()
-        self.prog = dspy.ChainOfThought("task, code_signature -> code")
+        self.prog = dspy.ChainOfThought(
+            "task, code_signature -> code")
 
     def forward(self, task: str, code_signature: str) -> Dict[str, str]:
         return self.prog(task=task, code_signature=code_signature)
@@ -40,6 +41,16 @@ class UnitTestGenerator(dspy.Module):
         return self.prog(task=task, code_signature=code_signature)
 
 
+class CodeFixer(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.prog = dspy.ChainOfThought(
+            "task, old_code, failed_test, error_message -> fixed_code")
+
+    def forward(self, task: str, old_code: str, failed_test: str, error_message: str) -> Dict[str, str]:
+        return self.prog(task=task, old_code=old_code, failed_test=failed_test, error_message=error_message)
+
+
 class CodeGenerationPipeline:
     def __init__(self, examples: List[Dict[str, str]]):
         self.examples = examples
@@ -49,6 +60,7 @@ class CodeGenerationPipeline:
             CodeGenerator, "task", "code_signature")
         self.trained_unit_test = self._compile_module(
             UnitTestGenerator, "task", "code_signature")
+        self.trained_code_fixer = CodeFixer()
 
     def _compile_module(self, module_class, *input_fields):
         examples = [dspy.Example(**x).with_inputs(*input_fields)
@@ -69,7 +81,7 @@ class CodeGenerationPipeline:
             code_signature=signature_result.code_signature)
 
         self._print_results(signature_result, code_result, test_result)
-        self._run_code_and_tests(code_result.code, test_result)
+        self._run_code_and_tests(task, code_result.code, test_result)
 
     def _print_results(self, signature_result, code_result, test_result):
         print(f"\nGenerated code signature:\n{
@@ -80,14 +92,41 @@ class CodeGenerationPipeline:
         print(f"test_2: {test_result.test_2}")
         print(f"edge_case_test_1: {test_result.edge_case_test_1}")
 
-    def _run_code_and_tests(self, code: str, test_result):
+    def _run_code_and_tests(self, task: str, code: str, test_result):
         print("\nRunning the code...")
-        exec(code)
-        print("Running the tests...")
-        exec(test_result.test_1)
-        exec(test_result.test_2)
-        exec(test_result.edge_case_test_1)
+        error_messages = {}
+        try:
+            exec(code)
+        except Exception as e:
+            error_messages["code_execution"] = f"Code execution error: {
+                str(e)}"
+
+        if not error_messages:
+            print("Running the tests...")
+            for test_name, test_code in [("test_1", test_result.test_1),
+                                         ("test_2", test_result.test_2),
+                                         ("edge_case_test_1", test_result.edge_case_test_1)]:
+                try:
+                    exec(test_code)
+                except Exception as e:
+                    print(f"Test {test_name} failed with error: {str(e)}")
+                    print("Re-generating the code with the execution feedback...")
+                    fixed_code = self._fix_code(task, code, test_code, str(e))
+                    print(f"\nFixed code:\n{fixed_code}")
+                    self._run_code_and_tests(task, fixed_code, test_result)
+                    return
+
         print("All generated tests passed")
+
+    def _fix_code(self, task: str, old_code: str, failed_test: str, error_message: str) -> str:
+        fix_result = self.trained_code_fixer(
+            task=task,
+            old_code=old_code,
+            failed_test=failed_test,
+            error_message=error_message
+        )
+
+        return fix_result.fixed_code
 
 
 # Example usage
